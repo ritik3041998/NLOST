@@ -1,0 +1,27 @@
+# Virtual environment
+nlost_env/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+models/__pycache__/
+models/utils_pytorch/__pycache__/
+pro/__pycache__/
+util/__pycache__/
+
+# VS Code
+.vscode/
+
+# Checkpoints (large model files - push manually if needed)
+checkpoints/
+
+# Datasets (large)
+data/
+dataset/
+
+# Outputs
+output/
+output_custom/
+output_new/
+output_ours/

@@ -10,7 +10,6 @@ import scipy.io as scio
 import cv2
 import util.SetDistTrain as utils
 import cv2
-import torch.nn.functional as F
 cudnn.benchmark = True
 from models import nlost
 def main(args):
@@ -45,38 +44,36 @@ def main(args):
 
     for i in range(len(all_file)): 
         transient_data = scio.loadmat(all_file[i])
-        transient_data = transient_data['data']  # h w t 
-        transient_data = transient_data.transpose([1,0,2])
-        M_wnoise = np.asarray(transient_data).astype(np.float32).reshape([1,128,128,-1]) 
+        transient_data = transient_data['final_meas']  # h w t
+        M_wnoise = np.asarray(transient_data).astype(np.float32).reshape([1, 256, 256, -1])  # 1, H, W, T
+        if args.target_size == 128:
+            M_wnoise = M_wnoise[:, ::2, :, :] + M_wnoise[:, 1::2, :, :]
+            M_wnoise = M_wnoise[:, :, ::2, :] + M_wnoise[:, :, 1::2, :]
         M_wnoise = np.ascontiguousarray(M_wnoise)
-        M_wnoise = np.transpose(M_wnoise, (0, 3, 1, 2))  
-        M_mea = torch.from_numpy(M_wnoise)  
+        M_wnoise = np.transpose(M_wnoise, (0, 3, 1, 2))  # 1, T, H, W
+        M_mea = torch.from_numpy(M_wnoise[None])  # 1, 1, T, H, W
         print(M_mea.shape)
-        if args.target_size==128:
-            pass
-        else:
-            M_mea = F.interpolate(M_mea, size=(256,) * 2)
-
-        M_mea = M_mea[None]
         with torch.no_grad():
             model.eval()
-            vlo_re, im_re,dep_re = model(M_mea)
+            vlo_re, im_re, dep_re = model(M_mea)
             im_re = (im_re + 1) / 2
             dep_re = (dep_re + 1) / 2
             front_view = im_re.detach().cpu().numpy()[0, 0]
             front_dep = dep_re.detach().cpu().numpy()[0, 0]
             name = files[i][:-4]
-            # vlo = vlo_re.detach().cpu().numpy()[0, 0]
-            cv2.imwrite(out_path + f'/{name}_int.png', (front_view / np.max(front_view))*255)
-            cv2.imwrite(out_path + f'/{name}_dep.png', (front_dep)*255)
-            # scio.savemat(out_path + f'/{i}.mat',{'pred_mea':vlo})
+            cv2.imwrite(out_path + f'/{name}_int.png', (front_view / np.max(front_view)) * 255)
+            cv2.imwrite(out_path + f'/{name}_dep.png', front_dep * 255)
+            del vlo_re, im_re, dep_re
+        del M_mea
+        torch.cuda.empty_cache()
+
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--fk_data_path", type=str, default=" ",help="Path to the fk dataset.")
-    parser.add_argument("--target_size", type=int, default=" ",help="The spatial resolution of the input transient, i.e., 256 or 128")
-    parser.add_argument("--output_path", type=str, default=" ",help="Path to output.")  
-    parser.add_argument("--pretrained_model", type=str, default=" ",help="Prtrained Model Path.")  
+    parser.add_argument("--fk_data_path", type=str, default=r"D:\NLOST\data\align_fk_256_512", help="Path to the fk dataset.")
+    parser.add_argument("--target_size", type=int, default=128, help="The spatial resolution")
+    parser.add_argument("--output_path", type=str, default=r"D:\NLOST\output_ours", help="Path to output.")
+    parser.add_argument("--pretrained_model", type=str, default=r"D:\NLOST\pretrain\size128.pth", help="Pretrained Model Path.")  
     args = parser.parse_args()
 
     return args

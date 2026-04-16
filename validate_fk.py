@@ -69,10 +69,10 @@ def main(args):
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--fk_data_path", type=str, default=" ",help="Path to the fk dataset.")
-    parser.add_argument("--target_size", type=int, default=" ",help="The spatial resolution of the input transient, i.e., 256 or 128")
-    parser.add_argument("--output_path", type=str, default=" ",help="Path to output.")  
-    parser.add_argument("--pretrained_model", type=str, default=" ",help="Prtrained Model Path.")  
+    parser.add_argument("--fk_data_path", type=str, default=r"D:\NLOST\data\align_fk_256_512", help="Path to the fk dataset.")
+    parser.add_argument("--target_size", type=int, default=128, help="The spatial resolution")
+    parser.add_argument("--output_path", type=str, default=r"D:\NLOST\output_new", help="Path to output.")
+    parser.add_argument("--pretrained_model", type=str, default=r"D:\NLOST\pretrain\size128.pth", help="Pretrained Model Path.")  
     args = parser.parse_args()
 
     return args
