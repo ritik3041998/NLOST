@@ -2,6 +2,7 @@ import os
 import numpy as np
 import argparse
 import torch
+import torch.nn.functional as F
 import torch.backends.cudnn as cudnn
 from torch.cuda.amp import autocast, GradScaler
 from torch.utils.tensorboard import SummaryWriter
@@ -44,6 +45,10 @@ def parse_args():
     parser.add_argument('--weight_decay', type=float, default=1e-4)
     parser.add_argument('--num_save',     type=int,   default=100,
                         help='Validate and save checkpoint every N iterations')
+    parser.add_argument('--int_weight',   type=float, default=1.0,
+                        help='Weight for intensity loss')
+    parser.add_argument('--vol_weight',   type=float, default=0.5,
+                        help='Weight for volume loss (0 to disable)')
     # mixed precision
     parser.add_argument('--amp',          action='store_true', default=True,
                         help='Enable mixed precision training (default: on)')
@@ -57,28 +62,34 @@ def parse_args():
 
 # validation
 
-def validate(model, val_loader, n_iter, logWriter, device, use_amp):
+def validate(model, val_loader, n_iter, logWriter, device, use_amp, vol_weight):
     metric_list = ['rmse', 'psnr', 'ssim']
     rmse_fn = RMSE().to(device)
     psnr_fn = PSNR().to(device)
     ssim_fn = SSIM().to(device)
     meters  = {k: AverageMeter() for k in metric_list}
 
-    l_int = []
+    l_int, l_vol = [], []
     model.eval()
 
     with torch.no_grad():
         for sample in tqdm(val_loader, desc='  val'):
-            M_mea  = sample['ds_meas'].cuda()          # (B,1,512,64,64)
-            img_gt = sample['img_gt'].cuda().unsqueeze(1)  # (B,1,64,64)
+            M_mea  = sample['ds_meas'].cuda()
+            img_gt = sample['img_gt'].cuda().unsqueeze(1)   # (B,1,64,64)
+            vol_gt = sample['vol_gt'].cuda()                # (B,1,1024,64,64)
 
             with autocast(enabled=use_amp):
-                _, inten_re, _ = model(M_mea)
+                vlo_re, inten_re, _ = model(M_mea)
                 inten_re = (inten_re + 1) / 2
 
             inten_re = inten_re.float()
+            vlo_re   = vlo_re.float()
 
             l_int.append(criterion_L2(inten_re, img_gt).item())
+
+            if vol_weight > 0:
+                vol_gt_r = F.adaptive_avg_pool3d(vol_gt.float(), vlo_re.shape[2:])
+                l_vol.append(criterion_L2(vlo_re, vol_gt_r).item())
 
             pred   = torch.clamp(inten_re.detach(), 0, 1)
             target = torch.clamp(img_gt,            0, 1)
@@ -87,6 +98,8 @@ def validate(model, val_loader, n_iter, logWriter, device, use_amp):
             meters['ssim'].update(ssim_fn(pred, target).cpu().item())
 
     logWriter.add_scalar('val/loss_int', np.mean(l_int), n_iter)
+    if l_vol:
+        logWriter.add_scalar('val/loss_vol', np.mean(l_vol), n_iter)
     for k in metric_list:
         logWriter.add_scalar(f'val/{k}', meters[k].item(), n_iter)
 
@@ -163,50 +176,61 @@ def main():
     logWriter = SummaryWriter(args.model_dir)
 
     logging.info('Starting training...')
+    recent_losses = []
+
     for epoch in range(start_epoch, args.num_epoch + 1):
         model.train()
-        logging.info(f'Epoch {epoch}/{args.num_epoch}  lr={optimizer.param_groups[0]["lr"]:.2e}')
 
-        for sample in tqdm(train_loader, desc=f'  epoch {epoch}'):
-            M_mea  = sample['ds_meas'].cuda()              # (B,1,512,64,64)
-            img_gt = sample['img_gt'].cuda().unsqueeze(1)  # (B,1,64,64)
+        for sample in tqdm(train_loader, desc=f'  epoch {epoch}/{args.num_epoch}'):
+            M_mea  = sample['ds_meas'].cuda()
+            img_gt = sample['img_gt'].cuda().unsqueeze(1)
+            vol_gt = sample['vol_gt'].cuda()
 
             with autocast(enabled=args.amp):
-                _, inten_re, _ = model(M_mea)
+                vlo_re, inten_re, _ = model(M_mea)
                 inten_re = (inten_re + 1) / 2
-                loss = criterion_L2(inten_re.float(), img_gt)
+                loss_int = criterion_L2(inten_re.float(), img_gt)
+                if args.vol_weight > 0:
+                    vol_gt_r  = F.adaptive_avg_pool3d(vol_gt.float(), vlo_re.shape[2:])
+                    vlo_re_1c = vlo_re.float().mean(dim=1, keepdim=True)
+                    loss_vol  = criterion_L2(vlo_re_1c, vol_gt_r)
+                    loss = args.int_weight * loss_int + args.vol_weight * loss_vol
+                else:
+                    loss = args.int_weight * loss_int
 
             optimizer.zero_grad()
             scaler.scale(loss).backward()
             scaler.step(optimizer)
             scaler.update()
             n_iter += 1
+            recent_losses.append(loss.item())
 
-            logWriter.add_scalar('train/loss',      loss.item(),        n_iter)
-            logWriter.add_scalar('train/amp_scale', scaler.get_scale(), n_iter)
+            logWriter.add_scalar('train/loss',     loss.item(),     n_iter)
+            logWriter.add_scalar('train/loss_int', loss_int.item(), n_iter)
+            if args.vol_weight > 0:
+                logWriter.add_scalar('train/loss_vol', loss_vol.item(), n_iter)
 
             if n_iter % args.num_save == 0:
-                logging.info(f'[iter {n_iter}] Running validation...')
+                avg_loss = np.mean(recent_losses)
+                recent_losses = []
+
                 val_metrics = validate(
-                    model, val_loader, n_iter, logWriter, device, args.amp
+                    model, val_loader, n_iter, logWriter, device, args.amp, args.vol_weight
                 )
                 model.train()
-                log_str = ' | '.join(f'{k} {v:.4f}' for k, v in val_metrics.items())
-                logging.info(f'[iter {n_iter}] val: {log_str}')
-                save_checkpoint(
-                    n_iter, epoch, model, optimizer,
-                    file_path=os.path.join(
-                        args.model_dir, f'epoch{epoch}_iter{n_iter}.pth'
-                    ),
+
+                logging.info(
+                    f'[iter {n_iter} | epoch {epoch}]  '
+                    f'loss {avg_loss:.4f}  |  '
+                    + '  |  '.join(f'{k} {v:.4f}' for k, v in val_metrics.items())
                 )
 
-        ckpt_path = os.path.join(args.model_dir, f'epoch{epoch}_end.pth')
-        save_checkpoint(n_iter, epoch, model, optimizer, file_path=ckpt_path)
-        ckpt = torch.load(ckpt_path, map_location='cpu')
-        ckpt['scaler'] = scaler.state_dict()
-        torch.save(ckpt, ckpt_path)
-
-        logging.info(f'Epoch {epoch} done. Checkpoint saved to {ckpt_path}')
+                ckpt_path = os.path.join(args.model_dir, f'iter{n_iter}.pth')
+                save_checkpoint(n_iter, epoch, model, optimizer, file_path=ckpt_path)
+                ckpt = torch.load(ckpt_path, map_location='cpu')
+                ckpt['scaler'] = scaler.state_dict()
+                torch.save(ckpt, ckpt_path)
+                logging.info(f'Checkpoint saved: iter{n_iter}.pth')
 
     logWriter.close()
     logging.info('Training complete.')

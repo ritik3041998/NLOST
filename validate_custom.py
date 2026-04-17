@@ -3,6 +3,7 @@ import glob
 import numpy as np
 import argparse
 import torch
+import torch.nn.functional as F
 import torch.backends.cudnn as cudnn
 import scipy.io as sio
 import cv2
@@ -130,10 +131,11 @@ def main():
             img_gt = batch['img_gt'].to(device).unsqueeze(1)  # (B,1,64,64)
 
             with autocast(enabled=use_amp):
-                _, inten_re, _ = model(M_mea)
+                vlo_re, inten_re, _ = model(M_mea)
                 inten_re = (inten_re + 1) / 2
 
             inten_re = inten_re.float()
+            vlo_re   = vlo_re.float()
 
             pred   = torch.clamp(inten_re.detach(), 0, 1)
             target = torch.clamp(img_gt,            0, 1)
@@ -145,25 +147,41 @@ def main():
             # save each image in the batch
             B = pred.shape[0]
             for b in range(B):
-                name      = file_list[sample_idx]
-                pred_np   = pred[b, 0].cpu().numpy()    # (H, W)  range [0,1]
-                gt_np     = target[b, 0].cpu().numpy()  # (H, W)  range [0,1]
+                name    = file_list[sample_idx]
+                pred_np = pred[b, 0].cpu().numpy()    # (H,W) range [0,1]
+                gt_np   = target[b, 0].cpu().numpy()  # (H,W) range [0,1]
 
-                # normalise pred to full range for display
+                # normalise pred intensity for display
                 pmax = pred_np.max()
-                if pmax > 0:
-                    pred_disp = pred_np / pmax
-                else:
-                    pred_disp = pred_np
+                pred_disp = pred_np / pmax if pmax > 0 else pred_np
 
                 cv2.imwrite(
-                    os.path.join(args.output_dir, f'{name}_pred.png'),
+                    os.path.join(args.output_dir, f'{name}_pred_int.png'),
                     (pred_disp * 255).astype(np.uint8),
                 )
                 cv2.imwrite(
-                    os.path.join(args.output_dir, f'{name}_gt.png'),
+                    os.path.join(args.output_dir, f'{name}_gt_int.png'),
                     (gt_np * 255).astype(np.uint8),
                 )
+
+                # save predicted volume
+                vol_np = vlo_re[b, 0].cpu().numpy()   # (D, H, W)
+
+                # depth max-projection → PNG (what the 3D volume looks like from top)
+                vol_proj = np.max(vol_np, axis=0)      # (H, W)
+                vmax = vol_proj.max()
+                vol_disp = vol_proj / vmax if vmax > 0 else vol_proj
+                cv2.imwrite(
+                    os.path.join(args.output_dir, f'{name}_pred_vol_proj.png'),
+                    (vol_disp * 255).astype(np.uint8),
+                )
+
+                # save full 3D volume as .mat
+                sio.savemat(
+                    os.path.join(args.output_dir, f'{name}_pred_vol.mat'),
+                    {'pred_vol': vol_np},
+                )
+
                 sample_idx += 1
 
     # ── print summary ────────────────────────────────────────────────────────
