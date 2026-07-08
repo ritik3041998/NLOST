@@ -58,12 +58,17 @@ class NLOST(nn.Module):
         self.spds = SPDS(channels_m * 4,ds=2)
         self.posenc_l = PosiEncCNN(channels_m * 4)
         self.posenc_g = PosiEncCNN(channels_m * 4)
+        # temporal feature resolution fed to the transformers: the FK volume has
+        # depth == tlen, and the conv stack (msfeat/sig_feat/dsfusion) reduces it by
+        # a fixed factor of 16. Inferred here instead of hardcoding 16 (tlen=256 -> 16),
+        # so different tlen (e.g. non-binned inputs) work without touching the encoders.
+        t_feat = self.tlen // 16
         # local encoders
-        self.loc_encds = modelClone(WindowEncoderSep(dim=channels_m * 4,input_resolution=[self.spatial,self.spatial,16],num_heads=4,window_size=self.spatial//2), self.coders)
+        self.loc_encds = modelClone(WindowEncoderSep(dim=channels_m * 4,input_resolution=[self.spatial,self.spatial,t_feat],num_heads=4,window_size=self.spatial//2), self.coders)
         # global encoders
-        self.glb_encds = modelClone(GlobalEncoderSep(dim=channels_m * 4,input_resolution=[self.spatial//2,self.spatial//2,16],num_heads=4), self.coders)
+        self.glb_encds = modelClone(GlobalEncoderSep(dim=channels_m * 4,input_resolution=[self.spatial//2,self.spatial//2,t_feat],num_heads=4), self.coders)
         # local-global integration
-        self.locglb_inte = LocGlbInteNBlks_LCGC_l1d2(channels_m * 4, [self.spatial,self.spatial,16],8, self.coders)
+        self.locglb_inte = LocGlbInteNBlks_LCGC_l1d2(channels_m * 4, [self.spatial,self.spatial,t_feat],8, self.coders)
         # reconstruction blocks
         self.inte_rec = NLOSInteRec_2(self.in_chans * 4,channels_m)        #  64
         self.project = VisbleNet()

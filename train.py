@@ -45,7 +45,7 @@ def main():
 
     logging.info("+++++++++++++++++++++++++++++++++++++++++++")
     logging.info(opt)
-    logging.info("Current main process GPUs: {}".format((opt.loc_rank)))
+    logging.info("Current main process GPUs: {}".format((opt.local_rank)))
     logging.info("Number of available GPUs: {} {}".format(torch.cuda.device_count(), \
         torch.cuda.get_device_name(torch.cuda.current_device())))
     logging.info("Number of Encoder-Decoders: {}".format(opt.num_coders))
@@ -65,21 +65,21 @@ def main():
     train_data = LFEDataset(root=folder_path,  # dataset root directory
                             shineness=shineness,
                             for_train=True,
-                            ds=1,  # temporal down-sampling factor
-                            clip=512,  # time range of histograms
-                            size=256,  # measurement size (unit: px)
+                            ds=opt.ds,  # temporal down-sampling factor (Bunny: 4 -> 2048/4=512)
+                            clip=opt.clip,  # time range of histograms
+                            size=opt.meas_size,  # measurement size (unit: px)
                             scale=1,  # scaling factor (float or float tuple)
                             background=[0.05, 2],  # background noise rate (float or float tuple)
                             target_size=opt.target_size,  # target image size (unit: px)
                             target_noise=0.01,  # standard deviation of target image noise
                             color='gray')  # color channel(s) of target image
-    
+
     val_data = LFEDataset(root=folder_path,  # dataset root directory
                           shineness=shineness,
                           for_train=False,
-                          ds=1,  # temporal down-sampling factor
-                          clip=512,  # time range of histograms
-                          size=256,  # measurement size (unit: px)
+                          ds=opt.ds,  # temporal down-sampling factor (Bunny: 4 -> 2048/4=512)
+                          clip=opt.clip,  # time range of histograms
+                          size=opt.meas_size,  # measurement size (unit: px)
                           scale=1,  # scaling factor (float or float tuple)
                           background=[0.05, 2],  # background noise rate (float or float tuple)
                           target_size=opt.target_size,  # target image size (unit: px)
@@ -104,12 +104,12 @@ def main():
 
     # build network and move it multi-GPU
     logging.info("Constructing Models...")
-    model = nlost.NLOST(ch_in=1, num_coders=1,spatial=128,tlen=256,bin_len=0.01,target_size=opt.target_size)
+    model = nlost.NLOST(ch_in=1, num_coders=1,spatial=opt.model_spatial,tlen=opt.tlen,bin_len=opt.bin_len,target_size=opt.target_size)
     model.to(device)
     logging.info(model)
     # ParamCounter(model)
     if opt.distributed:
-        model = DDP(model, device_ids=[opt.loc_rank],find_unused_parameters=True)
+        model = DDP(model, device_ids=[opt.local_rank],find_unused_parameters=True)
         logging.info("Models constructed complete! Paralleled on {} GPUs".format(torch.cuda.device_count()))
     else:
         logging.info("Models constructed complete on SINGLE GPU!")

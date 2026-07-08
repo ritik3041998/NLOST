@@ -7,3 +7,7 @@ tensorboard
 tqdm
 timm
 matplotlib
+
+
+(nlost_env) PS D:\NLOST> d:\NLOST\nlost_env\Scripts\python.exe d:/NLOST/visualize_vol.py --vol "D:\NLOST\output_run5_fixed\obj11_pred_vol.mat" --gt "D:\NLOST\data\vol\obj11.mat"                                                                                                                    
+>> 

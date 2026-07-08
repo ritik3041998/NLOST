@@ -160,12 +160,11 @@ class LFEDataset(Dataset):
         except:
             raise ValueError('measurement loading failed: {:s}'.format(path))
 
-        # spatial down-sampling
-        if self.ds > 1:
-            c, t, h, w = raw.shape
-            assert t % self.ds == 0
-            raw = raw.reshape(c, t // self.ds, self.ds, h, w)
-            raw = raw.sum(axis=2)
+        # NOTE: temporal down-sampling (self.ds) is already applied once above, before
+        # the temporal clip. A second, identical reduction used to live here (mislabeled
+        # "spatial down-sampling"), which double-binned the transient for any ds>1.
+        # It is removed so `ds` means a single temporal binning factor -- e.g. the Bunny
+        # dataset (64x64x2048) uses ds=4 to bin 2048 -> 512 bins. Bike (ds=1) is unchanged.
 
         c, t, h, w = raw.shape
         raw = torch.from_numpy(raw.astype(np.float32))  # (1/3, t, h, w)

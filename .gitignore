@@ -15,13 +15,21 @@ util/__pycache__/
 
 # Checkpoints (large model files - push manually if needed)
 checkpoints/
+checkpoints*/
 
 # Datasets (large)
 data/
 dataset/
+bike/
+bunny/
 
 # Outputs
 output/
 output_custom/
 output_new/
 output_ours/
+predictions/
+predictions*/
+
+# Training logs
+*.log

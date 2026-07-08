@@ -58,7 +58,7 @@ def validate(model, val_loader, n_iter, val_loss, params, logWriter,val_metrics)
         for k in metric_list:
             val_metrics[k].update(metric_dict[k].item())
     # log the val losses
-    if utils.is_main_process():
+    if utils.is_main_process() and l_all:
         logWriter.add_scalar("loss_val/all", np.mean(l_all), n_iter)
         logWriter.add_scalar("loss_val/l2", np.mean(l_l2), n_iter)
         logWriter.add_scalar("loss_val/l2_dep", np.mean(l_l2_dep), n_iter)

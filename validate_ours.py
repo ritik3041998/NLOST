@@ -14,20 +14,21 @@ cudnn.benchmark = True
 from models import nlost
 def main(args):
     
-    # baseline   
-    model = nlost.NLOST(ch_in=1, num_coders=1,spatial=128,tlen=256,bin_len=0.0096,target_size=args.target_size)
+    # baseline  -- config MUST match how the checkpoint was trained (see train.py)
+    model = nlost.NLOST(ch_in=1, num_coders=1,spatial=args.spatial,tlen=256,bin_len=args.bin_len,target_size=args.target_size)
     model.cuda()
     model = torch.nn.DataParallel(model)
     model_path = args.pretrained_model
     if model_path is not None:
         checkpoint = torch.load(model_path, map_location="cpu")
-        model_dict = model.state_dict()
         ckpt_dict = checkpoint['state_dict']
-        model_dict.update(ckpt_dict)
-        #for k in ckpt_dict.keys():
-        #    model_dict.update({k[7:]: ckpt_dict[k]})
-        model.load_state_dict(model_dict)
-        print('Loaded', model_path)
+        # our checkpoint has no 'module.' prefix; the DataParallel model expects one
+        new_dict = {}
+        for k, v in ckpt_dict.items():
+            nk = k if k.startswith('module.') else 'module.' + k
+            new_dict[nk] = v
+        missing, unexpected = model.load_state_dict(new_dict, strict=False)
+        print('Loaded', model_path, '| missing:', len(missing), 'unexpected:', len(unexpected))
     else:
         print('Loading Failed', model_path)
 
@@ -70,10 +71,12 @@ def main(args):
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--fk_data_path", type=str, default=r"D:\NLOST\data\align_fk_256_512", help="Path to the fk dataset.")
+    parser.add_argument("--fk_data_path", type=str, default=r"D:\NLOST\dataset\align_fk_256_512_meas_10min", help="Path to the fk dataset.")
     parser.add_argument("--target_size", type=int, default=128, help="The spatial resolution")
+    parser.add_argument("--spatial", type=int, default=64, help="model spatial grid (must match training)")
+    parser.add_argument("--bin_len", type=float, default=0.01, help="temporal bin length (must match training)")
     parser.add_argument("--output_path", type=str, default=r"D:\NLOST\output_ours", help="Path to output.")
-    parser.add_argument("--pretrained_model", type=str, default=r"D:\NLOST\pretrain\size128.pth", help="Pretrained Model Path.")  
+    parser.add_argument("--pretrained_model", type=str, default=r"D:\NLOST\checkpointsnlost_2026_78\epoch_4_176_END.pth", help="Pretrained Model Path.")
     args = parser.parse_args()
 
     return args
