@@ -1,0 +1,1 @@
+python train.py --model_dir "D:\NLOST\checkpoints_bunny" --model_name nlost --dataset bunny --data_dir "D:\NLOST\bunny" --meas_size 64 --ds 1 --clip 2048 --model_spatial 32 --tlen 1024 --bin_len 0.01 --target_size 64 --bacth_size 1 --num_workers 0 --num_epoch 6 --num_save 999999
