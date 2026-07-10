@@ -11,3 +11,18 @@ matplotlib
 
 (nlost_env) PS D:\NLOST> d:\NLOST\nlost_env\Scripts\python.exe d:/NLOST/visualize_vol.py --vol "D:\NLOST\output_run5_fixed\obj11_pred_vol.mat" --gt "D:\NLOST\data\vol\obj11.mat"                                                                                                                    
 >> 
+
+
+python train.py --model_dir "D:\NLOST\checkpoints_bunny" --model_name nlost --dataset bunny --data_dir "D:\NLOST\bunny" --meas_size 64 --ds 1 --clip 2048 --model_spatial 32 --tlen 1024 --bin_len 0.01 --target_size 64 --bacth_size 1 --num_workers 0 --num_epoch 6 --num_save 999999
+
+
+import numpy as np, h5py
+with h5py.File(r"D:\NLOST\dataset\meas_10min.mat", "r") as f:
+    meas = np.array(f["meas"])          # (T=2048, H=512, W=512)
+meas = meas.transpose(1, 2, 0)          # -> (512, 512, 2048)  (H, W, T)
+f = 8
+meas64 = meas.reshape(64, f, 64, f, 2048).sum(axis=(1, 3))   # -> (64, 64, 2048)
+print(meas64.shape)                     # (64, 64, 2048)
+
+
+python predict.py --checkpoint "checkpoints_bunnynlost_2026_78\epoch_5_250_END.pth" --input "D:\NLOST\dataset\meas_10min.mat" --spatial 32 --tlen 1024 --clip 2048 --target_size 64 --bin_len 0.01 --out "predictions_bunny"
