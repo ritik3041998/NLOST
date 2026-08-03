@@ -100,6 +100,55 @@ Notes:
 
 ---
 
+## 4b. GPU memory for 256×256×2048 (measured scaling)
+
+Peak GPU memory (batch 1, fwd+bwd), measured and extrapolated:
+
+| Config                         | Input          | Peak GPU |
+|--------------------------------|----------------|----------|
+| spatial=32, tlen=256           | 64×64×512      | 1.24 GB  |
+| spatial=64, tlen=256           | 128×128×512    | 4.96 GB  |
+| spatial=32, tlen=1024 (bunny)  | 64×64×2048     | 4.8 GB   |
+| **spatial=64, tlen=1024 (opt A)** | 128×128×2048 | **~19 GB** |
+| **spatial=128, tlen=256 (opt B)** | 256×256×512  | **~19 GB** |
+| **spatial=128, tlen=1024 (native)** | 256×256×2048 | **~77 GB** |
+
+Memory scales **quadratically with spatial**, **linearly with tlen**. So native
+256×256×2048 needs an ~80 GB GPU. For a 32 GB GPU pick one trade-off:
+
+| Option | Config | meas_size | target_size | model_spatial | ds | clip | tlen | Output | Keeps |
+|--------|--------|-----------|-------------|---------------|----|------|------|--------|-------|
+| **A** (full depth) | 128×128×2048 | 256 | 128 | 64  | 1 | 2048 | 1024 | 128×128 | all 2048 bins |
+| **B** (full spatial) | 256×256×512 | 256 | 256 | 128 | 4 | 512  | 256  | 256×256 | 256×256 detail |
+| **C** (native) | 256×256×2048 | 256 | 256 | 128 | 1 | 2048 | 1024 | 256×256 | everything (~80 GB GPU) |
+
+**Only `tlen ∈ {256, 1024}` are safe** — a latent window-attention relative-position
+bias bug breaks intermediate temporal sizes (e.g. tlen=512). A/B/C all use safe values.
+
+### Option A launcher — `run_train_256.bat` (fits 32 GB, keeps all 2048 bins)
+
+```bash
+python train.py --model_dir "checkpoints_256" --model_name nlost --dataset big256 \
+    --data_dir "path/to/your_256_dataset" \
+    --meas_size 256 --target_size 128 --model_spatial 64 \
+    --ds 1 --clip 2048 --tlen 1024 --bin_len 0.01 \
+    --bacth_size 1 --num_workers 8 --num_epoch 51 --num_save 999999
+```
+
+Verify memory/shape on the target GPU before a long run:
+
+```bash
+python -c "import torch;from models import nlost;m=nlost.NLOST(1,1,spatial=64,tlen=1024,bin_len=0.01,target_size=128).cuda().train();x=torch.rand(1,1,2048,128,128).cuda();v,i,d=m(x);((i+1)/2).mean().backward();print('OK',tuple(i.shape),'%.1f GB'%(torch.cuda.max_memory_allocated()/1e9))"
+```
+
+Reconstruct a 256×256×2048 test file with the Option-A model (auto-bins 256→128):
+
+```bash
+python predict.py --checkpoint "checkpoints_256.../epoch_50_XXXX_END.pth" \
+    --input "your_test.mat" --spatial 64 --tlen 1024 --clip 2048 \
+    --target_size 128 --bin_len 0.01 --out predictions_256
+```
+
 ## 5. The one case that DOES need a code change
 
 The dataloader's file lister (`util/LFEDataset.py: list_file_path_bike`) expects
